@@ -3,7 +3,6 @@ from openai import OpenAI
 import json
 from typing import Dict, List, Tuple
 
-# System Instructions
 def get_system_instructions():
     return {
         "personal_info": """
@@ -47,27 +46,15 @@ def get_system_instructions():
         5. Don't make medical assumptions or suggestions
 
         EXAMPLES:
-        User: "I have diabetes and my sugar is high"
-        Response: {"diagnosis": "diabetes", "concern": "high sugar", "target": ""}
-        """,
+        User: "I have diabetes"
+        Response: {"diagnosis": "diabetes", "concern": "", "target": ""}
 
-        "prompt_generation": """
-        You are a medical system assistant guiding a conversation to collect information.
-        
-        OBJECTIVE:
-        Generate appropriate prompts based on missing information and conversation context.
-
-        RULES:
-        1. Be conversational but focused
-        2. Ask for missing information clearly
-        3. Acknowledge provided information
-        4. Guide user through steps sequentially
-        5. Give examples if user seems confused
+        User: "My blood sugar is high and I want to control it"
+        Response: {"diagnosis": "", "concern": "high blood sugar", "target": "control blood sugar"}
         """
     }
 
 def initialize_session_state():
-    """Initialize all session state variables"""
     if 'mode' not in st.session_state:
         st.session_state.mode = None
     if 'form_data' not in st.session_state:
@@ -89,57 +76,65 @@ def initialize_session_state():
 def get_missing_fields(step: int) -> List[str]:
     """Get list of missing fields for current step"""
     if step == 1:
-        fields = ['name', 'age', 'location']
+        return [field for field in ['name', 'age', 'location'] 
+                if not st.session_state.form_data.get(field)]
     else:
-        fields = ['diagnosis', 'concern', 'target']
-    return [field for field in fields if not st.session_state.form_data.get(field)]
+        return [field for field in ['diagnosis', 'concern', 'target'] 
+                if not st.session_state.form_data.get(field)]
 
-def process_user_input(client: OpenAI, user_input: str) -> Dict[str, str]:
-    """Process user input using OpenAI API"""
-    instructions = get_system_instructions()
-    instruction_key = "personal_info" if st.session_state.conversation_step == 1 else "medical_info"
-    
+def check_step_completion(step: int) -> bool:
+    """Check if all required fields for the current step are filled"""
+    if step == 1:
+        return all(st.session_state.form_data.get(field) 
+                  for field in ['name', 'age', 'location'])
+    else:
+        return all(st.session_state.form_data.get(field) 
+                  for field in ['diagnosis', 'concern', 'target'])
+
+def process_user_input(client: OpenAI, user_input: str) -> str:
+    """Process user input and generate next prompt"""
     try:
+        # Get appropriate instruction set
+        instruction_key = "personal_info" if st.session_state.conversation_step == 1 else "medical_info"
+        
+        # Extract information
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
-                {"role": "system", "content": instructions[instruction_key]},
+                {"role": "system", "content": get_system_instructions()[instruction_key]},
                 {"role": "user", "content": user_input}
             ]
         )
-        return json.loads(response.choices[0].message.content)
+        extracted_info = json.loads(response.choices[0].message.content)
+        
+        # Update form data with extracted information
+        for field, value in extracted_info.items():
+            if value:
+                st.session_state.form_data[field] = value
+        
+        # Generate next prompt based on missing fields
+        missing = get_missing_fields(st.session_state.conversation_step)
+        
+        if not missing:
+            if st.session_state.conversation_step == 1:
+                return "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
+            else:
+                return "Thank you! I've collected all the necessary information."
+        
+        if st.session_state.conversation_step == 1:
+            name = st.session_state.form_data.get('name', '')
+            greeting = f"Thank you, {name}! " if name else ""
+            return f"{greeting}I still need your {', '.join(missing)}. Please provide them."
+        else:
+            diagnosis = st.session_state.form_data.get('diagnosis', '')
+            if diagnosis:
+                return f"I see your diagnosis is {diagnosis}. Could you please also tell me your {', '.join(missing)}?"
+            else:
+                return f"Please share your {', '.join(missing)}."
+                
     except Exception as e:
         st.error(f"Error processing input: {str(e)}")
-        return {}
-
-def generate_next_prompt(client: OpenAI) -> str:
-    """Generate the next conversation prompt"""
-    missing = get_missing_fields(st.session_state.conversation_step)
-    
-    if not missing:
-        if st.session_state.conversation_step == 1:
-            return "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
-        else:
-            return "Thank you! I've collected all the necessary information."
-    
-    context = {
-        "step": st.session_state.conversation_step,
-        "missing_fields": missing,
-        "collected_data": st.session_state.form_data
-    }
-    
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": get_system_instructions()["prompt_generation"]},
-                {"role": "user", "content": f"Generate next prompt for context: {context}"}
-            ]
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        st.error(f"Error generating prompt: {str(e)}")
-        return f"Please provide your {', '.join(missing)}."
+        return "I'm having trouble processing that. Could you please try again?"
 
 def main():
     st.title("Medical Information System")
@@ -200,8 +195,8 @@ def main():
         st.subheader("Conversation Mode")
         
         # Show current step
-        current_step = "Step 1: Personal Information" if st.session_state.conversation_step == 1 else "Step 2: Medical Information"
-        st.info(current_step)
+        step_text = "Step 1: Personal Information" if st.session_state.conversation_step == 1 else "Step 2: Medical Information"
+        st.info(step_text)
         
         # Display conversation history
         for speaker, message in st.session_state.conversation_history:
@@ -210,13 +205,10 @@ def main():
             else:
                 st.markdown(f"👤 **You**: {message}")
         
-        # Input area
+        # Input area with missing fields indicator
         if not st.session_state.conversation_complete:
-            placeholder = (
-                "Type your name, age, and location..."
-                if st.session_state.conversation_step == 1
-                else "Type your diagnosis, concern, and target..."
-            )
+            missing = get_missing_fields(st.session_state.conversation_step)
+            placeholder = f"Type your {', '.join(missing)}..."
             
             user_input = st.text_input(
                 "Your response",
@@ -225,28 +217,20 @@ def main():
             )
             
             if st.button("Send") and user_input:
-                # Process user input
-                extracted_info = process_user_input(client, user_input)
-                
-                # Update form data
-                for field, value in extracted_info.items():
-                    if value:
-                        st.session_state.form_data[field] = value
-                
-                # Update conversation history
+                # Add user input to history
                 st.session_state.conversation_history.append(("user", user_input))
                 
-                # Check step completion
-                missing_fields = get_missing_fields(st.session_state.conversation_step)
-                if not missing_fields:
+                # Process input and get next prompt
+                next_prompt = process_user_input(client, user_input)
+                
+                # Check step completion and update accordingly
+                if check_step_completion(st.session_state.conversation_step):
                     if st.session_state.conversation_step == 1:
                         st.session_state.conversation_step = 2
                         next_prompt = "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
                     else:
                         st.session_state.conversation_complete = True
                         next_prompt = "Thank you! I've collected all the necessary information."
-                else:
-                    next_prompt = generate_next_prompt(client)
                 
                 st.session_state.conversation_history.append(("system", next_prompt))
                 st.rerun()
