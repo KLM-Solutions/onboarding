@@ -55,6 +55,7 @@ def get_system_instructions():
     }
 
 def initialize_session_state():
+    """Initialize all session state variables"""
     if 'mode' not in st.session_state:
         st.session_state.mode = None
     if 'form_data' not in st.session_state:
@@ -90,6 +91,7 @@ def check_step_completion(step: int) -> bool:
     else:
         return all(st.session_state.form_data.get(field) 
                   for field in ['diagnosis', 'concern', 'target'])
+
 def process_user_input(client: OpenAI, user_input: str) -> str:
     """Process user input and generate next prompt"""
     try:
@@ -98,7 +100,7 @@ def process_user_input(client: OpenAI, user_input: str) -> str:
         
         # Extract information
         response = client.chat.completions.create(
-            model="gpt-4o-mini",
+            model="gpt-4o-mini",  
             messages=[
                 {"role": "system", "content": get_system_instructions()[instruction_key]},
                 {"role": "user", "content": user_input}
@@ -116,8 +118,10 @@ def process_user_input(client: OpenAI, user_input: str) -> str:
         
         if not missing:
             if st.session_state.conversation_step == 1:
+                st.session_state.conversation_step = 2  # Move to next step
                 return "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
             else:
+                st.session_state.conversation_complete = True  # Mark conversation as complete
                 return "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
         
         if st.session_state.conversation_step == 1:
@@ -134,6 +138,23 @@ def process_user_input(client: OpenAI, user_input: str) -> str:
     except Exception as e:
         st.error(f"Error processing input: {str(e)}")
         return "I'm having trouble processing that. Could you please try again?"
+
+def display_summary(form_data: Dict[str, str]):
+    """Display summary of collected information"""
+    if any(form_data.values()):
+        # Personal Information
+        st.markdown("**Personal Information:**")
+        st.write(f"👤 Name: {form_data.get('name', '-')}")
+        st.write(f"📅 Age: {form_data.get('age', '-')}")
+        st.write(f"📍 Location: {form_data.get('location', '-')}")
+        
+        # Medical Information
+        st.markdown("**Medical Information:**")
+        st.write(f"🏥 Diagnosis: {form_data.get('diagnosis', '-')}")
+        st.write(f"⚕️ Concern: {form_data.get('concern', '-')}")
+        st.write(f"🎯 Target: {form_data.get('target', '-')}")
+    else:
+        st.info("No information collected yet")
 
 def main():
     st.title("Medical Information System")
@@ -156,16 +177,19 @@ def main():
     with col2:
         if st.button("Enter by Conversation", use_container_width=True):
             st.session_state.mode = "conversation"
-            if not st.session_state.conversation_history:
-                st.session_state.conversation_history.append(
-                    ("system", "Tell me about yourself (name, age, location):")
-                )
+            st.session_state.conversation_step = 1  # Reset step
+            st.session_state.conversation_complete = False  # Reset completion
+            st.session_state.conversation_history = [
+                ("system", "Tell me about yourself (name, age, location):")
+            ]
     with col3:
         if st.button("Reset", use_container_width=True):
             st.session_state.clear()
             initialize_session_state()
+            return  # Exit after reset to prevent further processing
     
     st.divider()
+    
     # Form Mode
     if st.session_state.mode == "field":
         st.subheader("Enter Information by Field")
@@ -177,7 +201,9 @@ def main():
             # Form for input
             with st.form("medical_form"):
                 st.text_input("Name", key="name", value=st.session_state.form_data['name'])
-                st.number_input("Age", key="age", value=int(st.session_state.form_data['age']) if st.session_state.form_data['age'].isdigit() else 0, min_value=0, max_value=150)
+                st.number_input("Age", key="age", 
+                              value=int(st.session_state.form_data['age']) if st.session_state.form_data['age'].isdigit() else 0,
+                              min_value=0, max_value=150)
                 st.text_input("Location", key="location", value=st.session_state.form_data['location'])
                 st.text_input("Diagnosis", key="diagnosis", value=st.session_state.form_data['diagnosis'])
                 st.text_area("Concern", key="concern", value=st.session_state.form_data['concern'])
@@ -197,20 +223,7 @@ def main():
         with col2:
             # Summary section
             st.markdown("### Summary")
-            if any(st.session_state.form_data.values()):
-                # Personal Information
-                st.markdown("**Personal Information:**")
-                st.write(f"👤 Name: {st.session_state.form_data.get('name', '-')}")
-                st.write(f"📅 Age: {st.session_state.form_data.get('age', '-')}")
-                st.write(f"📍 Location: {st.session_state.form_data.get('location', '-')}")
-                
-                # Medical Information
-                st.markdown("**Medical Information:**")
-                st.write(f"🏥 Diagnosis: {st.session_state.form_data.get('diagnosis', '-')}")
-                st.write(f"⚕️ Concern: {st.session_state.form_data.get('concern', '-')}")
-                st.write(f"🎯 Target: {st.session_state.form_data.get('target', '-')}")
-            else:
-                st.info("No information collected yet")
+            display_summary(st.session_state.form_data)
     
     # Conversation Mode
     elif st.session_state.mode == "conversation":
@@ -232,30 +245,29 @@ def main():
             missing = get_missing_fields(st.session_state.conversation_step)
             placeholder = f"Type your {', '.join(missing)}..."
             
-            user_input = st.text_input(
-                "Your response",
-                key="conversation_input",
-                placeholder=placeholder
-            )
-            
-            if st.button("Send") and user_input:
-                # Add user input to history
-                st.session_state.conversation_history.append(("user", user_input))
+            # Create a form to handle input submission
+            with st.form(key="chat_form"):
+                user_input = st.text_input(
+                    "Your response",
+                    key="conversation_input",
+                    placeholder=placeholder
+                )
+                submit_button = st.form_submit_button("Send")
                 
-                # Process input and get next prompt
-                next_prompt = process_user_input(client, user_input)
-                
-                # Check step completion and update accordingly
-                if check_step_completion(st.session_state.conversation_step):
-                    if st.session_state.conversation_step == 1:
-                        st.session_state.conversation_step = 2
-                        next_prompt = "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
-                    else:
-                        st.session_state.conversation_complete = True
-                        next_prompt = "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
-                
-                st.session_state.conversation_history.append(("system", next_prompt))
-                st.rerun()
+                if submit_button and user_input:
+                    # Add user input to history
+                    st.session_state.conversation_history.append(("user", user_input))
+                    
+                    # Process input and get next prompt
+                    next_prompt = process_user_input(client, user_input)
+                    st.session_state.conversation_history.append(("system", next_prompt))
+                    
+                    # Clear the input field
+                    st.session_state.conversation_input = ""
+                    
+                    # Only rerun if we're not complete
+                    if not st.session_state.conversation_complete:
+                        st.rerun()
 
 if __name__ == "__main__":
     main()
