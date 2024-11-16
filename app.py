@@ -60,11 +60,11 @@ def extract_information(client: OpenAI, text: str) -> Dict[str, str]:
 
 def generate_next_question(client: OpenAI, current_data: Dict[str, str], conversation_history: List[Tuple[str, str]]) -> str:
     """
-    Use LLM to generate the next appropriate question based on missing information
+    Enhanced version with better handling of repeated responses
     """
     system_prompt = """
     You are an AI medical assistant having a conversation with a patient. 
-    Generate the next question based on the missing information.
+    Analyze the conversation history and current situation carefully.
     
     Required fields:
     - name
@@ -74,50 +74,89 @@ def generate_next_question(client: OpenAI, current_data: Dict[str, str], convers
     - concern
     - target
     
-    Rules:
-    1. Ask for one piece of missing information at a time
-    2. Be conversational and natural
-    3. Reference previously provided information when relevant
-    4. If all information is complete, indicate with: "COMPLETION: All information collected"
-    5. Make the questions contextual based on previous responses
+    Special handling rules:
+    1. If the user repeats the same answer more than twice, respond with a different approach:
+       - Explain why you need the information
+       - Provide an example of how to answer
+       - Use a more specific question format
+    2. If you detect the conversation is stuck:
+       - Acknowledge the situation
+       - Provide clear examples of expected response
+       - Offer multiple choice options if appropriate
+    3. For age specifically:
+       - If user keeps repeating name/other info, say: "I have your name as [name]. For age, please just type a number, like '25' or '30'."
     
-    Previous conversation and current data will be provided. Generate only the next question.
+    Generate the next appropriate response based on the conversation flow.
     """
     
-    # Prepare the conversation context
-    context = "Current information:\n"
-    for field, value in current_data.items():
-        context += f"{field}: {value}\n"
+    # Count repeated responses
+    user_responses = [msg[1] for msg in conversation_history if msg[0] == "user"]
+    last_response = user_responses[-1] if user_responses else ""
+    repeat_count = sum(1 for r in user_responses[-3:] if r == last_response)
     
-    context += "\nConversation history:\n"
-    for speaker, text in conversation_history:
-        context += f"{speaker}: {text}\n"
+    # Prepare the conversation context with additional metadata
+    context = {
+        "current_data": current_data,
+        "conversation_history": conversation_history,
+        "repeated_response_count": repeat_count,
+        "last_response": last_response,
+        "missing_fields": [field for field, value in current_data.items() if not value]
+    }
     
     try:
         response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
-                {"role": "user", "content": context}
+                {"role": "user", "content": str(context)}
             ],
             temperature=0.1
         )
         return response.choices[0].message.content
     except Exception as e:
         st.error(f"Error in generating question: {str(e)}")
-        return "I apologize, but I'm having trouble generating the next question. Could you please provide any missing information?"
+        return "I'm having trouble understanding. Could you please provide your age as a number? For example: 25"
 
 def process_conversation_input(client: OpenAI, user_input: str):
+    """
+    Enhanced version with better input processing
+    """
     # Add user's response to conversation history
     st.session_state.conversation_history.append(("user", user_input))
     
-    # Extract information from user's response
+    # Check for repeated responses
+    user_responses = [msg[1] for msg in st.session_state.conversation_history if msg[0] == "user"]
+    repeat_count = sum(1 for r in user_responses[-3:] if r == user_input)
+    
+    if repeat_count >= 3:
+        # If user has repeated the same response 3 times, provide more specific guidance
+        if "age" in str(st.session_state.conversation_history[-2][1]).lower():
+            next_question = "I notice you're repeating your name. For age, I just need a number. For example, if you're 25 years old, just type '25'. How old are you?"
+        else:
+            next_question = generate_next_question(client, st.session_state.form_data, st.session_state.conversation_history)
+        st.session_state.conversation_history.append(("system", next_question))
+        return
+    
+    # Try to extract information
     extracted_info = extract_information(client, user_input)
     
     # Update form data with any new information
+    updated = False
     for field, value in extracted_info.items():
         if value and not st.session_state.form_data[field]:
             st.session_state.form_data[field] = value
+            updated = True
+    
+    # If no new information was extracted, handle accordingly
+    if not updated and repeat_count > 1:
+        missing_fields = [field for field, value in st.session_state.form_data.items() if not value]
+        if missing_fields:
+            if "age" in missing_fields:
+                next_question = "Let me be more specific: I need your age as a number. For example, if you're 25 years old, just type '25'. What is your age?"
+            else:
+                next_question = generate_next_question(client, st.session_state.form_data, st.session_state.conversation_history)
+            st.session_state.conversation_history.append(("system", next_question))
+            return
     
     # Generate next question based on missing information
     next_question = generate_next_question(
@@ -127,14 +166,13 @@ def process_conversation_input(client: OpenAI, user_input: str):
     )
     
     # Check if all information is collected
-    if next_question.startswith("COMPLETION:"):
+    if "COMPLETION:" in next_question:
         st.session_state.conversation_complete = True
         st.session_state.conversation_history.append(
             ("system", "Thank you! I've collected all the necessary information.")
         )
     else:
         st.session_state.conversation_history.append(("system", next_question))
-
 def main():
     st.title("Medical Information System")
     
