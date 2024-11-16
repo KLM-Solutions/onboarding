@@ -27,6 +27,9 @@ def get_system_instructions():
 
         User: "I'm 25 and live in New York"
         Response: {"age": "25", "location": "New York", "name": ""}
+
+        User: "I'm John from New York, 25 years old"
+        Response: {"name": "John", "age": "25", "location": "New York"}
         """,
 
         "medical_info": """
@@ -119,7 +122,7 @@ def process_user_input(client: OpenAI, user_input: str) -> str:
             if st.session_state.conversation_step == 1:
                 return "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
             else:
-                return "Thank you! I've collected all the necessary information."
+                return "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
         
         if st.session_state.conversation_step == 1:
             name = st.session_state.form_data.get('name', '')
@@ -168,29 +171,64 @@ def main():
     
     st.divider()
     
-    # Form Mode
+    # Form Mode with Summary
     if st.session_state.mode == "field":
         st.subheader("Enter Information by Field")
-        with st.form("medical_form"):
-            st.text_input("Name", key="name", value=st.session_state.form_data['name'])
-            st.number_input("Age", key="age", value=int(st.session_state.form_data['age']) if st.session_state.form_data['age'].isdigit() else 0, min_value=0, max_value=150)
-            st.text_input("Location", key="location", value=st.session_state.form_data['location'])
-            st.text_input("Diagnosis", key="diagnosis", value=st.session_state.form_data['diagnosis'])
-            st.text_area("Concern", key="concern", value=st.session_state.form_data['concern'])
-            st.text_area("Target", key="target", value=st.session_state.form_data['target'])
-            
-            if st.form_submit_button("Submit"):
-                st.session_state.form_data = {
-                    'name': st.session_state.name,
-                    'age': str(st.session_state.age),
-                    'location': st.session_state.location,
-                    'diagnosis': st.session_state.diagnosis,
-                    'concern': st.session_state.concern,
-                    'target': st.session_state.target
+        
+        # Create two columns
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Form for input
+            with st.form("medical_form"):
+                st.text_input("Name", key="name", value=st.session_state.form_data['name'])
+                st.number_input("Age", key="age", value=int(st.session_state.form_data['age']) if st.session_state.form_data['age'].isdigit() else 0, min_value=0, max_value=150)
+                st.text_input("Location", key="location", value=st.session_state.form_data['location'])
+                st.text_input("Diagnosis", key="diagnosis", value=st.session_state.form_data['diagnosis'])
+                st.text_area("Concern", key="concern", value=st.session_state.form_data['concern'])
+                st.text_area("Target", key="target", value=st.session_state.form_data['target'])
+                
+                if st.form_submit_button("Submit"):
+                    st.session_state.form_data = {
+                        'name': st.session_state.name,
+                        'age': str(st.session_state.age),
+                        'location': st.session_state.location,
+                        'diagnosis': st.session_state.diagnosis,
+                        'concern': st.session_state.concern,
+                        'target': st.session_state.target
+                    }
+                    st.success("Information submitted successfully!")
+        
+        with col2:
+            # Summary section with better styling
+            st.markdown("### Summary")
+            if any(st.session_state.form_data.values()):
+                # Personal Information
+                st.markdown("""
+                <style>
+                .summary-header {
+                    font-weight: bold;
+                    margin-bottom: 10px;
                 }
-                st.success("Information submitted successfully!")
+                .summary-item {
+                    margin: 5px 0;
+                }
+                </style>
+                """, unsafe_allow_html=True)
+                
+                st.markdown("**Personal Information:**")
+                st.markdown(f"👤 Name: {st.session_state.form_data.get('name', '-')}")
+                st.markdown(f"📅 Age: {st.session_state.form_data.get('age', '-')}")
+                st.markdown(f"📍 Location: {st.session_state.form_data.get('location', '-')}")
+                
+                st.markdown("**Medical Information:**")
+                st.markdown(f"🏥 Diagnosis: {st.session_state.form_data.get('diagnosis', '-')}")
+                st.markdown(f"⚕️ Concern: {st.session_state.form_data.get('concern', '-')}")
+                st.markdown(f"🎯 Target: {st.session_state.form_data.get('target', '-')}")
+            else:
+                st.info("No information collected yet")
     
-    # Conversation Mode
+    # Conversation Mode (without collected information display)
     elif st.session_state.mode == "conversation":
         st.subheader("Conversation Mode")
         
@@ -230,37 +268,10 @@ def main():
                         next_prompt = "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
                     else:
                         st.session_state.conversation_complete = True
-                        next_prompt = "Thank you! I've collected all the necessary information."
+                        next_prompt = "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
                 
                 st.session_state.conversation_history.append(("system", next_prompt))
                 st.rerun()
-        
-        # Display collected information
-        if any(st.session_state.form_data.values()):
-            st.divider()
-            st.subheader("Collected Information")
-            
-            # Personal Information
-            if any(st.session_state.form_data.get(field) for field in ['name', 'age', 'location']):
-                st.write("Personal Information:")
-                cols = st.columns(3)
-                with cols[0]:
-                    st.write("Name:", st.session_state.form_data.get('name', ''))
-                with cols[1]:
-                    st.write("Age:", st.session_state.form_data.get('age', ''))
-                with cols[2]:
-                    st.write("Location:", st.session_state.form_data.get('location', ''))
-            
-            # Medical Information
-            if any(st.session_state.form_data.get(field) for field in ['diagnosis', 'concern', 'target']):
-                st.write("Medical Information:")
-                cols = st.columns(3)
-                with cols[0]:
-                    st.write("Diagnosis:", st.session_state.form_data.get('diagnosis', ''))
-                with cols[1]:
-                    st.write("Concern:", st.session_state.form_data.get('concern', ''))
-                with cols[2]:
-                    st.write("Target:", st.session_state.form_data.get('target', ''))
 
 if __name__ == "__main__":
     main()
