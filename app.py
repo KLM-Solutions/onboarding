@@ -27,9 +27,6 @@ def get_system_instructions():
 
         User: "I'm 25 and live in New York"
         Response: {"age": "25", "location": "New York", "name": ""}
-
-        User: "I'm John from New York, 25 years old"
-        Response: {"name": "John", "age": "25", "location": "New York"}
         """,
 
         "medical_info": """
@@ -93,7 +90,6 @@ def check_step_completion(step: int) -> bool:
     else:
         return all(st.session_state.form_data.get(field) 
                   for field in ['diagnosis', 'concern', 'target'])
-
 def process_user_input(client: OpenAI, user_input: str) -> str:
     """Process user input and generate next prompt"""
     try:
@@ -170,8 +166,7 @@ def main():
             initialize_session_state()
     
     st.divider()
-    
-    # Form Mode with Summary
+    # Form Mode
     if st.session_state.mode == "field":
         st.subheader("Enter Information by Field")
         
@@ -200,35 +195,24 @@ def main():
                     st.success("Information submitted successfully!")
         
         with col2:
-            # Summary section with better styling
+            # Summary section
             st.markdown("### Summary")
             if any(st.session_state.form_data.values()):
                 # Personal Information
-                st.markdown("""
-                <style>
-                .summary-header {
-                    font-weight: bold;
-                    margin-bottom: 10px;
-                }
-                .summary-item {
-                    margin: 5px 0;
-                }
-                </style>
-                """, unsafe_allow_html=True)
-                
                 st.markdown("**Personal Information:**")
-                st.markdown(f"👤 Name: {st.session_state.form_data.get('name', '-')}")
-                st.markdown(f"📅 Age: {st.session_state.form_data.get('age', '-')}")
-                st.markdown(f"📍 Location: {st.session_state.form_data.get('location', '-')}")
+                st.write(f"👤 Name: {st.session_state.form_data.get('name', '-')}")
+                st.write(f"📅 Age: {st.session_state.form_data.get('age', '-')}")
+                st.write(f"📍 Location: {st.session_state.form_data.get('location', '-')}")
                 
+                # Medical Information
                 st.markdown("**Medical Information:**")
-                st.markdown(f"🏥 Diagnosis: {st.session_state.form_data.get('diagnosis', '-')}")
-                st.markdown(f"⚕️ Concern: {st.session_state.form_data.get('concern', '-')}")
-                st.markdown(f"🎯 Target: {st.session_state.form_data.get('target', '-')}")
+                st.write(f"🏥 Diagnosis: {st.session_state.form_data.get('diagnosis', '-')}")
+                st.write(f"⚕️ Concern: {st.session_state.form_data.get('concern', '-')}")
+                st.write(f"🎯 Target: {st.session_state.form_data.get('target', '-')}")
             else:
                 st.info("No information collected yet")
     
-    # Conversation Mode (without collected information display)
+    # Conversation Mode
     elif st.session_state.mode == "conversation":
         st.subheader("Conversation Mode")
         
