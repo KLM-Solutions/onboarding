@@ -1,15 +1,14 @@
 import streamlit as st
-import openai
-import re
+from openai import OpenAI
+import json
 from typing import Dict, List, Tuple
 
-# Initialize OpenAI (you'll need to set your API key)
+# Initialize OpenAI client
 def init_openai():
     if 'OPENAI_API_KEY' not in st.secrets:
         st.error("OpenAI API key not found. Please add it to your secrets.")
-        return False
-    openai.api_key = st.secrets['OPENAI_API_KEY']
-    return True
+        return None
+    return OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
 
 def initialize_session_state():
     if 'mode' not in st.session_state:
@@ -28,7 +27,7 @@ def initialize_session_state():
     if 'conversation_complete' not in st.session_state:
         st.session_state.conversation_complete = False
 
-def extract_information(text: str) -> Dict[str, str]:
+def extract_information(client: OpenAI, text: str) -> Dict[str, str]:
     """
     Use LLM to extract relevant information from user's text
     """
@@ -46,20 +45,20 @@ def extract_information(text: str) -> Dict[str, str]:
     """
     
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": text}
             ],
-            temperature=0,
+            temperature=0.1
         )
-        return eval(response.choices[0].message.content)
+        return json.loads(response.choices[0].message.content)
     except Exception as e:
         st.error(f"Error in extracting information: {str(e)}")
         return {}
 
-def generate_next_question(current_data: Dict[str, str], conversation_history: List[Tuple[str, str]]) -> str:
+def generate_next_question(client: OpenAI, current_data: Dict[str, str], conversation_history: List[Tuple[str, str]]) -> str:
     """
     Use LLM to generate the next appropriate question based on missing information
     """
@@ -95,25 +94,25 @@ def generate_next_question(current_data: Dict[str, str], conversation_history: L
         context += f"{speaker}: {text}\n"
     
     try:
-        response = openai.ChatCompletion.create(
+        response = client.chat.completions.create(
             model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": context}
             ],
-            temperature=0.7,
+            temperature=0.1
         )
         return response.choices[0].message.content
     except Exception as e:
         st.error(f"Error in generating question: {str(e)}")
         return "I apologize, but I'm having trouble generating the next question. Could you please provide any missing information?"
 
-def process_conversation_input(user_input: str):
+def process_conversation_input(client: OpenAI, user_input: str):
     # Add user's response to conversation history
     st.session_state.conversation_history.append(("user", user_input))
     
     # Extract information from user's response
-    extracted_info = extract_information(user_input)
+    extracted_info = extract_information(client, user_input)
     
     # Update form data with any new information
     for field, value in extracted_info.items():
@@ -122,6 +121,7 @@ def process_conversation_input(user_input: str):
     
     # Generate next question based on missing information
     next_question = generate_next_question(
+        client,
         st.session_state.form_data,
         st.session_state.conversation_history
     )
@@ -138,8 +138,9 @@ def process_conversation_input(user_input: str):
 def main():
     st.title("Medical Information System")
     
-    # Initialize OpenAI
-    if not init_openai():
+    # Initialize OpenAI client
+    client = init_openai()
+    if not client:
         return
     
     # Initialize session state
@@ -201,8 +202,8 @@ def main():
         if not st.session_state.conversation_complete:
             user_input = st.text_input("Your response", key="conversation_input")
             if st.button("Send") and user_input:
-                process_conversation_input(user_input)
-                st.experimental_rerun()
+                process_conversation_input(client, user_input)
+                st.rerun()  # Using st.rerun() instead of st.experimental_rerun()
     
     # Display collected information
     if any(st.session_state.form_data.values()):
