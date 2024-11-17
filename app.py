@@ -39,13 +39,7 @@ def get_system_instructions():
             "validation_errors": [array of specific error messages]
         }
 
-        VALIDATION BEHAVIOR:
-        1. For invalid inputs, return empty string for that field
-        2. Include specific error message explaining why the input was rejected
-        3. Request correction with clear guidance
-        4. Never accept or store invalid data
-        """,
-
+     
         "medical_info": """
         You are a medical system assistant collecting medical information. You must strictly validate all medical data.
         
@@ -81,13 +75,7 @@ def get_system_instructions():
             "validation_errors": [array of specific error messages]
         }
 
-        VALIDATION BEHAVIOR:
-        1. For invalid medical terms, return empty string for that field
-        2. Include specific error message explaining why the term was rejected
-        3. Request clarification using proper medical terminology
-        4. Never accept or store non-medical or invalid terminology
-        5. For ambiguous terms, request clarification with proper medical terms
-        """
+      
     }
 def initialize_session_state():
     if 'mode' not in st.session_state:
