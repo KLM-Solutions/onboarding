@@ -20,6 +20,9 @@ def get_system_instructions():
         3. If a field is missing, leave it empty
         4. For age, only accept numeric values
         5. Don't make assumptions about missing information
+        6. Don't repeat questions for information already provided
+        7. If no new information is provided in the input, return empty values
+
 
         EXAMPLES:
         User: "My name is John"
@@ -44,6 +47,9 @@ def get_system_instructions():
         3. If a field is missing, leave it empty
         4. Keep medical terminology as stated by the user
         5. Don't make medical assumptions or suggestions
+        6. Don't repeat questions for information already provided
+        7. If no new information is provided in the input, return empty values
+
 
         EXAMPLES:
         User: "I have diabetes"
