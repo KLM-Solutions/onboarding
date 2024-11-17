@@ -6,76 +6,52 @@ from typing import Dict, List, Tuple
 def get_system_instructions():
     return {
         "personal_info": """
-        You are a medical system assistant collecting personal information. You must strictly validate all information provided.
+        You are a medical system assistant collecting personal information.
         
         OBJECTIVE:
-        Extract and validate personal information, ensuring data accuracy and real-world validity.
-        Required fields:
-        1. name (string)
-        2. age (numeric)
-        3. location (geographic)
+        Extract personal information from user input, focusing on three key fields:
+        1. name
+        2. age
+        3. location
 
-        VALIDATION RULES:
-        1. Names:
-           - Accept alphabetic characters, spaces, and common name punctuation
-           - Reject numeric or special characters
-        
-        2. Age:
-           - Must be numeric values only
-           - Must be within human life expectancy (0-150)
-           - Reject non-numeric or unrealistic ages
-        
-        3. Location:
-           - Must be a verifiable real-world geographic location
-           - Format as City, State/Province/Region, Country where possible
-           - Reject any non-geographic or fictional locations
-           - Reject astronomical or non-Earth locations
-        
-        Output Format:
-        {
-            "name": string or empty,
-            "age": numeric string or empty,
-            "location": validated location string or empty,
-            "validation_errors": [array of specific error messages]
-        }
+        RULES:
+        1. Only extract information that is explicitly stated
+        2. Format response as JSON: {"name": "", "age": "", "location": ""}
+        3. If a field is missing, leave it empty
+        4. For age, only accept numeric values
+        5. Don't make assumptions about missing information
 
-     
+        EXAMPLES:
+        User: "My name is John"
+        Response: {"name": "John", "age": "", "location": ""}
+
+        User: "I'm 25 and live in New York"
+        Response: {"age": "25", "location": "New York", "name": ""}
+        """,
+
         "medical_info": """
-        You are a medical system assistant collecting medical information. You must strictly validate all medical data.
+        You are a medical system assistant collecting information about a patient's condition.
         
         OBJECTIVE:
-        Extract and validate medical information, ensuring clinical accuracy and proper terminology.
-        Required fields:
-        1. diagnosis (medical condition)
-        2. concern (symptoms/issues)
-        3. target (treatment goals)
+        Extract medical information from user input, focusing on three key fields:
+        1. diagnosis
+        2. concern
+        3. target
 
-        VALIDATION RULES:
-        1. Diagnosis:
-           - Must be recognized medical conditions using proper clinical terminology
-           - Reject non-medical terms, abbreviations, or colloquial descriptions
-           - Verify against known medical conditions database
-           - Flag any unusual or non-standard medical terms
-        
-        2. Concerns:
-           - Must relate to medical symptoms or health issues
-           - Accept both technical and lay descriptions of symptoms
-           - Must be specific and health-related
-        
-        3. Treatment Targets:
-           - Must be realistic medical goals
-           - Must align with the stated diagnosis
-           - Must be specific and measurable where possible
-        
-        Output Format:
-        {
-            "diagnosis": validated medical term or empty,
-            "concern": validated concern or empty,
-            "target": validated target or empty,
-            "validation_errors": [array of specific error messages]
-        }
+        RULES:
+        1. Only extract information that is explicitly stated
+        2. Format response as JSON: {"diagnosis": "", "concern": "", "target": ""}
+        3. If a field is missing, leave it empty
+        4. Keep medical terminology as stated by the user
+        5. Don't make medical assumptions or suggestions
 
-      
+        EXAMPLES:
+        User: "I have diabetes"
+        Response: {"diagnosis": "diabetes", "concern": "", "target": ""}
+
+        User: "My blood sugar is high and I want to control it"
+        Response: {"diagnosis": "", "concern": "high blood sugar", "target": "control blood sugar"}
+        """
     }
 def initialize_session_state():
     if 'mode' not in st.session_state:
