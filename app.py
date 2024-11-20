@@ -1,7 +1,7 @@
+
 import streamlit as st
 import requests
 import json
-import re 
 from typing import Dict, Any, Optional, Generator
 from openai import OpenAI
 
@@ -49,12 +49,12 @@ class UserProfileManager:
                 messages=[
                     {"role": "system", "content": self.system_instructions[info_type]},
                     {"role": "user", "content": user_input}
-                ]
+                ],
+                response_format={ "type": "json_object" }
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:
-            st.error(f"Error processing input: {str(e)}")
-            return {}
+            return {"error": str(e)}
 
 class ProfileAnalyzer:
     def __init__(self, openai_client: OpenAI):
@@ -78,11 +78,10 @@ class ProfileAnalyzer:
            - Specific precautions based on medical history
            - Priority health targets
 
-        Format the response as a structured summary that can be used to inform GLP-1 medication discussions.
-        Keep the analysis focused and relevant to GLP-1 medications.
+        Return the analysis in JSON format with these exact sections.
         """
 
-    def analyze_profile(self, profile: Dict[str, str]) -> str:
+    def analyze_profile(self, profile: Dict[str, str]) -> Dict:
         try:
             prompt = f"""
             Patient Profile:
@@ -102,26 +101,22 @@ class ProfileAnalyzer:
                     {"role": "system", "content": "You are a medical profile analyzer."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
-                max_tokens=500
+                response_format={ "type": "json_object" }
             )
             
-            return response.choices[0].message.content
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
-            st.error(f"Error analyzing profile: {str(e)}")
-            return "Error generating profile analysis"
+            return {"error": str(e)}
 
 class GLP1Bot:
     def __init__(self, pplx_api_key: str):
         self.pplx_api_key = pplx_api_key
         self.pplx_model = "llama-3.1-sonar-large-128k-online"
-        
         self.pplx_headers = {
             "Authorization": f"Bearer {self.pplx_api_key}",
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        
         self.pplx_system_prompt = """
         You are a specialized medical information assistant providing highly personalized GLP-1 medication information.
         
@@ -161,110 +156,23 @@ class GLP1Bot:
            - Include standard medical disclaimer
            - Encourage healthcare provider consultation
 
-        PERSONALIZATION RULES:
-        1. For diabetic patients:
-           - Focus on blood sugar management
-           - Discuss insulin interaction
-           - Address hypoglycemia risks
-        
-        2. For obesity management:
-           - Focus on weight loss expectations
-           - Discuss lifestyle integration
-           - Address dietary considerations
-        
-        3. For older patients (65+):
-           - Emphasize slower titration
-           - Focus on side effect management
-           - Discuss monitoring requirements
-        
-        4. For multiple conditions:
-           - Address medication interactions
-           - Discuss combined management strategies
-           - Emphasize coordination of care
-
-        5. For specific concerns:
-           - Directly address stated worries
-           - Provide relevant monitoring strategies
-           - Suggest specific discussion points for healthcare provider
-
+        Always provide source which is related to the generated response.
+        Provide response in a simple manner that is easy to understand at preferably a 11th grade literacy level with reduced pharmaceutical or medical jargon
+        Always Return sources in a hyperlink format
         Always maintain medical accuracy while being accessible and empathetic.
+
+        Format all responses as JSON with appropriate sections matching the above structure.
         """
 
-    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> str:
-        # Structure the medical context
-        medical_context = {
-            'age_group': 'elderly' if int(user_profile.get('age', 0)) >= 65 else 'adult',
-            'has_diabetes': any(term in user_profile.get('diagnosis', '').lower() 
-                              for term in ['diabetes', 'type 2', 't2dm']),
-            'weight_management': any(term in user_profile.get('concern', '').lower() 
-                                   for term in ['weight', 'obesity', 'bmi']),
-            'blood_sugar': any(term in user_profile.get('target', '').lower() 
-                             for term in ['glucose', 'sugar', 'a1c'])
-        }
-        
-        # Generate condition-specific considerations
-        specific_considerations = []
-        if medical_context['age_group'] == 'elderly':
-            specific_considerations.append("- Consider age-related factors for dosing and monitoring")
-        if medical_context['has_diabetes']:
-            specific_considerations.append("- Address diabetes management and blood sugar monitoring")
-        if medical_context['weight_management']:
-            specific_considerations.append("- Focus on weight management goals and expectations")
-        
-        return f"""
-        COMPREHENSIVE PATIENT PROFILE
-        ---------------------------
-        Personal Information:
-        - Name: {user_profile.get('name', 'Unknown')}
-        - Age: {user_profile.get('age', 'Unknown')} ({medical_context['age_group']})
-        - Location: {user_profile.get('location', 'Unknown')}
-
-        Medical Context:
-        - Diagnosis: {user_profile.get('diagnosis', 'Unknown')}
-        - Primary Concern: {user_profile.get('concern', 'Unknown')}
-        - Treatment Target: {user_profile.get('target', 'Unknown')}
-
-        Medical Analysis Summary:
-        {profile_analysis}
-
-        Special Considerations:
-        {chr(10).join(specific_considerations)}
-
-        Current Query:
-        "{query}"
-
-        Please provide a personalized response that:
-        1. Addresses {user_profile.get('name', 'the patient')} directly
-        2. Considers their {user_profile.get('diagnosis', 'condition')}
-        3. Aligns with their goal to {user_profile.get('target', 'improve health')}
-        4. Accounts for their specific concern about {user_profile.get('concern', 'health management')}
-        5. Includes age-appropriate recommendations for {medical_context['age_group']} patients
-        6. Provides location-relevant information where applicable
-
-        Format the response with clear sections for:
-        - Personalized greeting and context acknowledgment
-        - Direct answer to the query
-        - Specific precautions based on their profile
-        - Customized recommendations
-        - Next steps and monitoring suggestions
-        - Medical disclaimer
-        """
-
-    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
+    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
         try:
-            personalized_query = self.generate_personalized_prompt(query, user_profile, profile_analysis)
+            prompt = self.generate_personalized_prompt(query, user_profile, profile_analysis)
             
             payload = {
                 "model": self.pplx_model,
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": self.pplx_system_prompt
-                    },
-                    {
-                        "role": "user",
-                        "content": personalized_query
-                    }
+                    {"role": "system", "content": self.pplx_system_prompt},
+                    {"role": "user", "content": prompt}
                 ]
             }
             
@@ -275,205 +183,61 @@ class GLP1Bot:
             )
             
             if response.status_code != 200:
-                error_message = f"PPLX API Error: {response.status_code} - {response.text}"
-                st.error(error_message)
-                yield {
-                    "type": "error",
-                    "message": error_message
-                }
+                yield {"status": "error", "message": f"API Error: {response.status_code}"}
                 return
 
             try:
                 response_data = response.json()
                 content = response_data['choices'][0]['message']['content']
+                response_json = json.loads(content)
                 
-                # Add medical disclaimer if not present
-                if "disclaimer" not in content.lower():
-                    content += "\n\nDisclaimer: This information is for educational purposes only and should not replace professional medical advice. Always consult your healthcare provider before making any changes to your medication or treatment plan."
+                yield {"status": "success", "data": response_json}
                 
-                # Split content into chunks for streaming simulation
-                chunk_size = 50
-                chunks = [content[i:i + chunk_size] for i in range(0, len(content), chunk_size)]
-                
-                accumulated_content = ""
-                for chunk in chunks:
-                    accumulated_content += chunk
-                    yield {
-                        "type": "content",
-                        "data": chunk,
-                        "accumulated": accumulated_content
-                    }
-                
-                yield {
-                    "type": "complete",
-                    "content": content,
-                    "sources": "Information provided by medical literature and FDA guidelines for GLP-1 medications."
-                }
-                
-            except Exception as e:
-                error_message = f"Error parsing PPLX response: {str(e)}"
-                st.error(error_message)
-                yield {
-                    "type": "error",
-                    "message": error_message
-                }
+            except json.JSONDecodeError as e:
+                yield {"status": "error", "message": f"Parsing error: {str(e)}", "raw_content": content}
                 
         except Exception as e:
-            error_message = f"Error communicating with PPLX: {str(e)}"
-            st.error(error_message)
-            yield {
-                "type": "error",
-                "message": error_message
-            }
+            yield {"status": "error", "message": str(e)}
 
-    def categorize_query(self, query: str) -> str:
-        """Categorize the user query"""
-        categories = {
-            "dosage": ["dose", "dosage", "how to take", "when to take", "injection", "administration"],
-            "side_effects": ["side effect", "adverse", "reaction", "problem", "issues", "symptoms"],
-            "benefits": ["benefit", "advantage", "help", "work", "effect", "weight", "glucose"],
-            "storage": ["store", "storage", "keep", "refrigerate", "temperature"],
-            "lifestyle": ["diet", "exercise", "lifestyle", "food", "alcohol", "eating"],
-            "interactions": ["interaction", "drug", "medication", "combine", "mixing"],
-            "cost": ["cost", "price", "insurance", "coverage", "afford"]
-        }
-        
-        query_lower = query.lower()
-        for category, keywords in categories.items():
-            if any(keyword in query_lower for keyword in keywords):
-                return category
-        return "general"
-def set_page_style():
-    """Set page style using custom CSS"""
-    st.markdown("""
-    <style>
-        .main {
-            background-color: #f5f5f5;
-        }
-        .stTextInput>div>div>input {
-            background-color: white;
-        }
-        .chat-message {
-            padding: 1.5rem;
-            border-radius: 0.8rem;
-            margin: 1rem 0;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .user-message {
-            background-color: #e3f2fd;
-            border-left: 4px solid #1976d2;
-        }
-        .bot-message {
-            background-color: #f5f5f5;
-            border-left: 4px solid #43a047;
-        }
-        .category-tag {
-            background-color: #2196f3;
-            color: white;
-            padding: 0.2rem 0.6rem;
-            border-radius: 1rem;
-            font-size: 0.8rem;
-            margin-bottom: 0.5rem;
-            display: inline-block;
-        }
-        .profile-section {
-            background-color: #e8f5e9;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin: 1rem 0;
-            border-left: 4px solid #43a047;
-        }
-        .analysis-content {
-            background-color: #f5f5f5;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            margin-top: 0.5rem;
-        }
-        .step-indicator {
-            background-color: #bbdefb;
-            padding: 0.5rem;
-            border-radius: 0.5rem;
-            margin: 1rem 0;
-            text-align: center;
-        }
-    </style>
-    """, unsafe_allow_html=True)
+    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
+        return f"""
+        Patient Profile:
+        Name: {user_profile.get('name')}
+        Age: {user_profile.get('age')}
+        Location: {user_profile.get('location')}
+        Diagnosis: {user_profile.get('diagnosis')}
+        Concern: {user_profile.get('concern')}
+        Target: {user_profile.get('target')}
 
-def initialize_session_state():
-    """Initialize session state variables"""
-    if 'profile_complete' not in st.session_state:
-        st.session_state.profile_complete = False
-    if 'user_profile' not in st.session_state:
-        st.session_state.user_profile = {
-            'name': '',
-            'age': '',
-            'location': '',
-            'diagnosis': '',
-            'concern': '',
-            'target': ''
-        }
-    if 'profile_analysis' not in st.session_state:
-        st.session_state.profile_analysis = None
-    if 'chat_history' not in st.session_state:
-        st.session_state.chat_history = []
-    if 'current_step' not in st.session_state:
-        st.session_state.current_step = 'personal_info'
+        Analysis: {json.dumps(profile_analysis)}
 
-def display_profile_summary(profile_analysis: str):
-    st.markdown("""
-        <div class="profile-section">
-            <h4>Your Profile</h4>
-            <p><strong>Personal Information:</strong></p>
-            <ul>
-                <li>Name: {name}</li>
-                <li>Age: {age}</li>
-                <li>Location: {location}</li>
-            </ul>
-            <p><strong>Medical Information:</strong></p>
-            <ul>
-                <li>Diagnosis: {diagnosis}</li>
-                <li>Primary Concern: {concern}</li>
-                <li>Treatment Target: {target}</li>
-            </ul>
-            <p><strong>Medical Analysis:</strong></p>
-            <div class="analysis-content">
-                {analysis}
-            </div>
-        </div>
-    """.format(
-        **st.session_state.user_profile,
-        analysis=profile_analysis.replace('\n', '<br>')
-    ), unsafe_allow_html=True)
+        Query: {query}
 
-def validate_api_keys():
-    """Validate the presence and basic format of required API keys"""
-    required_keys = {
-        'OPENAI_API_KEY': 'OpenAI',
-        'PPLX_API_KEY': 'Perplexity'
+        Provide a response in the required JSON format, ensuring all fields are filled appropriately.
+        Remember to maintain simple language at an 11th grade reading level.
+        Include hyperlinked sources related to the response.
+        """
+
+# Initialize session state
+if 'profile_complete' not in st.session_state:
+    st.session_state.profile_complete = False
+if 'user_profile' not in st.session_state:
+    st.session_state.user_profile = {
+        'name': '', 'age': '', 'location': '',
+        'diagnosis': '', 'concern': '', 'target': ''
     }
-    
-    missing_keys = []
-    for key, service in required_keys.items():
-        if key not in st.secrets:
-            missing_keys.append(service)
-        elif not st.secrets[key].strip():
-            missing_keys.append(service)
-    
-    if missing_keys:
-        st.error(f"Missing API keys for: {', '.join(missing_keys)}")
-        return False
-    return True
+if 'profile_analysis' not in st.session_state:
+    st.session_state.profile_analysis = None
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 'personal_info'
 
 def main():
-    st.set_page_config(
-        page_title="Personalized GLP-1 Medical Assistant",
-        page_icon="💊",
-        layout="wide"
-    )
+    st.title("GLP-1 Medication Assistant")
     
-    set_page_style()
-    
-    if not validate_api_keys():
+    if 'OPENAI_API_KEY' not in st.secrets or 'PPLX_API_KEY' not in st.secrets:
+        st.json({"error": "Missing API keys"})
         return
     
     openai_client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
@@ -481,161 +245,50 @@ def main():
     profile_analyzer = ProfileAnalyzer(openai_client)
     glp1_bot = GLP1Bot(st.secrets['PPLX_API_KEY'])
     
-    initialize_session_state()
-    
-    st.title("💊 Personalized GLP-1 Medication Assistant")
-    
-    # Profile Collection Phase
     if not st.session_state.profile_complete:
-        st.info("Let's collect some information to provide you with personalized guidance.")
-        
         if st.session_state.current_step == 'personal_info':
-            st.markdown('<div class="step-indicator">Step 1: Personal Information</div>', unsafe_allow_html=True)
-            personal_info = st.text_input(
-                "Please enter your name, age, and location:",
-                help="Example: My name is John Smith, I'm 45 years old and live in New York"
-            )
-            
+            personal_info = st.text_input("Enter name, age, and location:")
             if st.button("Next") and personal_info:
-                extracted_info = profile_manager.process_user_input(personal_info, "personal_info")
-                st.session_state.user_profile.update(extracted_info)
-                if all(st.session_state.user_profile[field] for field in ['name', 'age', 'location']):
+                info = profile_manager.process_user_input(personal_info, "personal_info")
+                st.json(info)
+                st.session_state.user_profile.update(info)
+                if all(st.session_state.user_profile[f] for f in ['name', 'age', 'location']):
                     st.session_state.current_step = 'medical_info'
                     st.rerun()
-                else:
-                    st.warning("Please provide all required personal information (name, age, and location).")
-                
-        elif st.session_state.current_step == 'medical_info':
-            st.markdown('<div class="step-indicator">Step 2: Medical Information</div>', unsafe_allow_html=True)
-            
-            # Show collected personal information
-            st.markdown("**Collected Personal Information:**")
-            display_profile_summary("")
-            
-            medical_info = st.text_input(
-                "Please describe your diagnosis, main medical concern, and treatment target:",
-                help="Example: I have type 2 diabetes, concerned about blood sugar control, aiming to manage weight and glucose levels"
-            )
-            
-            col1, col2 = st.columns([1, 4])
-            with col1:
-                if st.button("← Back"):
-                    st.session_state.current_step = 'personal_info'
+        
+        else:  # medical_info step
+            st.json(st.session_state.user_profile)
+            medical_info = st.text_input("Enter diagnosis, concern, and treatment target:")
+            if st.button("Complete") and medical_info:
+                info = profile_manager.process_user_input(medical_info, "medical_info")
+                st.json(info)
+                st.session_state.user_profile.update(info)
+                if all(st.session_state.user_profile[f] for f in ['diagnosis', 'concern', 'target']):
+                    analysis = profile_analyzer.analyze_profile(st.session_state.user_profile)
+                    st.json(analysis)
+                    st.session_state.profile_analysis = analysis
+                    st.session_state.profile_complete = True
                     st.rerun()
-            with col2:
-                if st.button("Complete Profile") and medical_info:
-                    extracted_info = profile_manager.process_user_input(medical_info, "medical_info")
-                    st.session_state.user_profile.update(extracted_info)
-                    
-                    if all(st.session_state.user_profile[field] for field in ['diagnosis', 'concern', 'target']):
-                        # Generate profile analysis
-                        with st.spinner("Analyzing your medical profile..."):
-                            st.session_state.profile_analysis = profile_analyzer.analyze_profile(
-                                st.session_state.user_profile
-                            )
-                        st.session_state.profile_complete = True
-                        st.success("Profile completed! Analysis generated successfully.")
-                        st.rerun()
-                    else:
-                        st.warning("Please provide all required medical information.")
     
-    # GLP-1 Query Phase
     else:
-        col1, col2 = st.columns([1, 3])
+        st.json({"profile": st.session_state.user_profile, "analysis": st.session_state.profile_analysis})
         
-        with col1:
-            st.markdown("### Your Profile")
-            display_profile_summary(st.session_state.profile_analysis)
-            
-            if st.button("Edit Profile"):
-                st.session_state.profile_complete = False
-                st.session_state.profile_analysis = None
-                st.session_state.current_step = 'personal_info'
-                st.rerun()
-        
-        with col2:
-            st.markdown("### Ask about GLP-1 Medications")
-            st.markdown("""
-            <div class="info-box">
-            Now that we have your profile information, you can ask specific questions about GLP-1 medications. 
-            Your responses will be personalized based on your medical profile.
-            </div>
-            """, unsafe_allow_html=True)
-            
-            user_query = st.text_input(
-                "What would you like to know about GLP-1 medications?",
-                placeholder="e.g., What are the common side effects of Ozempic?"
-            )
-            
-            if st.button("Get Answer") and user_query:
-                query_category = glp1_bot.categorize_query(user_query)
-                
-                st.markdown(f"""
-                <div class="chat-message user-message">
-                    <b>Your Question:</b><br>{user_query}
-                </div>
-                """, unsafe_allow_html=True)
-                
-                response_placeholder = st.empty()
-                sources_placeholder = st.empty()
-                
-                for chunk in glp1_bot.stream_pplx_response(
-                    query=user_query,
-                    user_profile=st.session_state.user_profile,
-                    profile_analysis=st.session_state.profile_analysis
-                ):
-                    if chunk["type"] == "error":
-                        st.error(chunk["message"])
-                        break
-                        
-                    elif chunk["type"] == "content":
-                        response_placeholder.markdown(f"""
-                        <div class="chat-message bot-message">
-                            <div class="category-tag">{query_category.upper()}</div>
-                            {chunk["accumulated"]}
-                        </div>
-                        """, unsafe_allow_html=True)
-                        
-                    elif chunk["type"] == "complete":
-                        # Add response to chat history
-                        st.session_state.chat_history.append({
-                            "query": user_query,
-                            "response": chunk["content"],
-                            "category": query_category,
-                            "sources": chunk["sources"]
-                        })
-                        
-                        sources_placeholder.markdown(f"""
-                        <div class="sources-section">
-                            <b>Sources:</b><br>
-                            {chunk["sources"]}
-                        </div>
-                        """, unsafe_allow_html=True)
-            
-            # Display chat history
-            if st.session_state.chat_history:
-                st.markdown("### Previous Questions")
-                for i, chat in enumerate(reversed(st.session_state.chat_history[:-1]), 1):
-                    with st.expander(f"Question {len(st.session_state.chat_history) - i}: {chat['query'][:50]}..."):
-                        st.markdown(f"""
-                        <div class="chat-message user-message">
-                            <b>Your Question:</b><br>{chat['query']}
-                        </div>
-                        <div class="chat-message bot-message">
-                            <div class="category-tag">{chat['category'].upper()}</div>
-                            {chat['response']}
-                        </div>
-                        <div class="sources-section">
-                            <b>Sources:</b><br>
-                            {chat['sources']}
-                        </div>
-                        """, unsafe_allow_html=True)
+        query = st.text_input("Ask about GLP-1 medications:")
+        if st.button("Submit") and query:
+            for response in glp1_bot.stream_pplx_response(
+                query=query,
+                user_profile=st.session_state.user_profile,
+                profile_analysis=st.session_state.profile_analysis
+            ):
+                st.json(response)
+                if response["status"] == "success":
+                    st.session_state.chat_history.append({
+                        "query": query,
+                        "response": response["data"]
+                    })
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"An unexpected error occurred: {str(e)}")
-        st.error("Please refresh the page and try again.")
-
-
+        st.json({"error": str(e)})
