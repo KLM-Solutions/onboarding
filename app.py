@@ -194,7 +194,7 @@ class GLP1Bot:
                 yield {"status": "success", "data": response_json}
                 
             except json.JSONDecodeError as e:
-                yield {"status": "error", "message": f"Parsing error: {str(e)}", "raw_content": content}
+                yield { "raw_content": content}
                 
         except Exception as e:
             yield {"status": "error", "message": str(e)}
