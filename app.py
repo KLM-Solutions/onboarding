@@ -33,7 +33,7 @@ class UserProfileManager:
     def process_user_input(self, user_input: str, info_type: str) -> Dict[str, str]:
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": self.system_instructions[info_type]},
                     {"role": "user", "content": user_input}
@@ -84,7 +84,7 @@ class ProfileAnalyzer:
             """
 
             response = self.client.chat.completions.create(
-                model="gpt-4",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a medical profile analyzer."},
                     {"role": "user", "content": prompt}
