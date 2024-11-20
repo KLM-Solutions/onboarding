@@ -1,4 +1,3 @@
-
 import streamlit as st
 import requests
 import json
@@ -43,18 +42,15 @@ class UserProfileManager:
         }
 
     def process_user_input(self, user_input: str, info_type: str) -> Dict[str, str]:
-        try:
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": self.system_instructions[info_type]},
-                    {"role": "user", "content": user_input}
-                ],
-                response_format={ "type": "json_object" }
-            )
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            return {"error": str(e)}
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": self.system_instructions[info_type]},
+                {"role": "user", "content": user_input}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        return json.loads(response.choices[0].message.content)
 
 class ProfileAnalyzer:
     def __init__(self, openai_client: OpenAI):
@@ -82,31 +78,28 @@ class ProfileAnalyzer:
         """
 
     def analyze_profile(self, profile: Dict[str, str]) -> Dict:
-        try:
-            prompt = f"""
-            Patient Profile:
-            - Name: {profile['name']}
-            - Age: {profile['age']}
-            - Location: {profile['location']}
-            - Diagnosis: {profile['diagnosis']}
-            - Primary Concern: {profile['concern']}
-            - Treatment Target: {profile['target']}
+        prompt = f"""
+        Patient Profile:
+        - Name: {profile['name']}
+        - Age: {profile['age']}
+        - Location: {profile['location']}
+        - Diagnosis: {profile['diagnosis']}
+        - Primary Concern: {profile['concern']}
+        - Treatment Target: {profile['target']}
 
-            {self.analysis_prompt}
-            """
+        {self.analysis_prompt}
+        """
 
-            response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
-                messages=[
-                    {"role": "system", "content": "You are a medical profile analyzer."},
-                    {"role": "user", "content": prompt}
-                ],
-                response_format={ "type": "json_object" }
-            )
-            
-            return json.loads(response.choices[0].message.content)
-        except Exception as e:
-            return {"error": str(e)}
+        response = self.client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": "You are a medical profile analyzer."},
+                {"role": "user", "content": prompt}
+            ],
+            response_format={ "type": "json_object" }
+        )
+        
+        return json.loads(response.choices[0].message.content)
 
 class GLP1Bot:
     def __init__(self, pplx_api_key: str):
@@ -164,39 +157,27 @@ class GLP1Bot:
         Format all responses as JSON with appropriate sections matching the above structure.
         """
 
-    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
-        try:
-            prompt = self.generate_personalized_prompt(query, user_profile, profile_analysis)
-            
-            payload = {
-                "model": self.pplx_model,
-                "messages": [
-                    {"role": "system", "content": self.pplx_system_prompt},
-                    {"role": "user", "content": prompt}
-                ]
-            }
-            
-            response = requests.post(
-                "https://api.perplexity.ai/chat/completions",
-                headers=self.pplx_headers,
-                json=payload
-            )
-            
-            if response.status_code != 200:
-                yield {"status": "error", "message": f"API Error: {response.status_code}"}
-                return
-
-            try:
-                response_data = response.json()
-                content = response_data['choices'][0]['message']['content']
-                response_json = json.loads(content)
-                
-                yield {"status": "success", "data": response_json}
-                
-            except json.JSONDecodeError as e:
-                yield { "raw_content": content}
-                
+    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Dict[str, Any]:
+        prompt = self.generate_personalized_prompt(query, user_profile, profile_analysis)
         
+        payload = {
+            "model": self.pplx_model,
+            "messages": [
+                {"role": "system", "content": self.pplx_system_prompt},
+                {"role": "user", "content": prompt}
+            ]
+        }
+        
+        response = requests.post(
+            "https://api.perplexity.ai/chat/completions",
+            headers=self.pplx_headers,
+            json=payload
+        )
+        
+        response_data = response.json()
+        content = response_data['choices'][0]['message']['content']
+        return json.loads(content)
+
     def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
         return f"""
         Patient Profile:
@@ -273,20 +254,16 @@ def main():
         
         query = st.text_input("Ask about GLP-1 medications:")
         if st.button("Submit") and query:
-            for response in glp1_bot.stream_pplx_response(
+            response = glp1_bot.stream_pplx_response(
                 query=query,
                 user_profile=st.session_state.user_profile,
                 profile_analysis=st.session_state.profile_analysis
-            ):
-                st.json(response)
-                if response["status"] == "success":
-                    st.session_state.chat_history.append({
-                        "query": query,
-                        "response": response["data"]
-                    })
+            )
+            st.json(response)
+            st.session_state.chat_history.append({
+                "query": query,
+                "response": response
+            })
 
 if __name__ == "__main__":
-    try:
-        main()
-    except Exception as e:
-        st.json({"error": str(e)})
+    main()
