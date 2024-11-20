@@ -1,3 +1,4 @@
+
 import streamlit as st
 import requests
 import json
@@ -9,46 +10,35 @@ class UserProfileManager:
         self.client = openai_client
         self.system_instructions = {
             "personal_info": """
-            You are a medical system assistant collecting personal information.
-            
-            OBJECTIVE:
-            Extract personal information from user input, focusing on three key fields:
-            1. name
-            2. age
-            3. location
-
-            RULES:
-            1. Only extract information that is explicitly stated
-            2. Format response as JSON: {"name": "", "age": "", "location": ""}
-            3. If a field is missing, leave it empty
-            4. For age, only accept numeric values
+            Extract personal information and return ONLY a JSON object with this exact structure:
+            {
+                "name": "patient name",
+                "age": "numeric age",
+                "location": "patient location"
+            }
+            Only include explicitly stated information. Leave fields empty if not mentioned.
             """,
-
-            "medical_info": """
-            You are a medical system assistant collecting information about a patient's condition.
             
-            OBJECTIVE:
-            Extract medical information from user input, focusing on three key fields:
-            1. diagnosis
-            2. concern
-            3. target
-
-            RULES:
-            1. Only extract information that is explicitly stated
-            2. Format response as JSON: {"diagnosis": "", "concern": "", "target": ""}
-            3. If a field is missing, leave it empty
-            4. Keep medical terminology as stated by the user
+            "medical_info": """
+            Extract medical information and return ONLY a JSON object with this exact structure:
+            {
+                "diagnosis": "patient diagnosis",
+                "concern": "primary medical concern",
+                "target": "treatment target or goal"
+            }
+            Only include explicitly stated information. Leave fields empty if not mentioned.
             """
         }
 
     def process_user_input(self, user_input: str, info_type: str) -> Dict[str, str]:
         try:
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=[
                     {"role": "system", "content": self.system_instructions[info_type]},
                     {"role": "user", "content": user_input}
-                ]
+                ],
+                response_format={ "type": "json_object" }
             )
             return json.loads(response.choices[0].message.content)
         except Exception as e:
@@ -59,26 +49,27 @@ class ProfileAnalyzer:
     def __init__(self, openai_client: OpenAI):
         self.client = openai_client
         self.analysis_prompt = """
-        You are a medical profile analyzer specializing in GLP-1 medication contexts. 
-        Review the following patient profile and provide a concise analysis focusing on:
-
-        1. Key Risk Factors:
-           - Age-related considerations
-           - Diagnosis-specific concerns
-           - Potential contraindications
-
-        2. Treatment Context:
-           - Relevance of GLP-1 medications to their condition
-           - Important monitoring considerations
-           - Lifestyle factors to consider
-
-        3. Special Considerations:
-           - Key drug interactions to watch for
-           - Specific precautions based on medical history
-           - Priority health targets
+        Analyze the patient profile and return ONLY a JSON object with this exact structure:
+        {
+            "risk_factors": {
+                "age_related": ["list of age-related considerations"],
+                "diagnosis_related": ["list of diagnosis-specific concerns"],
+                "contraindications": ["list of potential contraindications"]
+            },
+            "treatment_context": {
+                "glp1_relevance": "relevance to condition",
+                "monitoring_needs": ["list of monitoring considerations"],
+                "lifestyle_factors": ["list of lifestyle factors"]
+            },
+            "special_considerations": {
+                "drug_interactions": ["list of potential drug interactions"],
+                "precautions": ["list of specific precautions"],
+                "priority_targets": ["list of health targets"]
+            }
+        }
         """
 
-    def analyze_profile(self, profile: Dict[str, str]) -> str:
+    def analyze_profile(self, profile: Dict[str, str]) -> Dict[str, Any]:
         try:
             prompt = f"""
             Patient Profile:
@@ -93,19 +84,18 @@ class ProfileAnalyzer:
             """
 
             response = self.client.chat.completions.create(
-                model="gpt-4o-mini",
+                model="gpt-4",
                 messages=[
                     {"role": "system", "content": "You are a medical profile analyzer."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.1,
-                max_tokens=500
+                response_format={ "type": "json_object" }
             )
             
-            return response.choices[0].message.content
+            return json.loads(response.choices[0].message.content)
         except Exception as e:
             st.error(f"Error analyzing profile: {str(e)}")
-            return "Error generating profile analysis"
+            return {}
 
 class GLP1Bot:
     def __init__(self, pplx_api_key: str):
@@ -117,26 +107,28 @@ class GLP1Bot:
             "Accept": "application/json"
         }
         self.pplx_system_prompt = """
-        You are a specialized medical information assistant providing GLP-1 medication information.
-        
-        You MUST format ALL responses as JSON with the following structure:
+        Return ONLY a JSON object with this exact structure:
         {
-            "greeting": "Personalized greeting using patient's name",
-            "response": {
-                "direct_answer": "Clear, concise answer to the query",
-                "medical_context": "How this applies to the patient's specific condition",
-                "precautions": "Relevant warnings based on patient profile",
-                "recommendations": "Personalized recommendations",
-                "next_steps": "Suggested actions and monitoring"
+            "query_info": {
+                "category": "dosage|side_effects|benefits|interactions|lifestyle|general",
+                "question": "original question"
             },
-            "sources": "Reference to medical guidelines or literature",
-            "disclaimer": "Standard medical disclaimer"
+            "response": {
+                "direct_answer": "clear answer to the query",
+                "medical_relevance": "relevance to patient condition",
+                "precautions": ["list of relevant warnings"],
+                "recommendations": ["list of personalized recommendations"],
+                "next_steps": ["list of suggested actions"]
+            },
+            "metadata": {
+                "sources": ["relevant medical guidelines"],
+                "confidence_level": "high|medium|low",
+                "disclaimer": "medical disclaimer"
+            }
         }
-        
-        Keep all responses factual and tailored to the patient's profile.
         """
 
-    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
+    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
         try:
             prompt = self.generate_personalized_prompt(query, user_profile, profile_analysis)
             
@@ -155,67 +147,62 @@ class GLP1Bot:
             )
             
             if response.status_code != 200:
-                yield {"type": "error", "message": f"API Error: {response.status_code}"}
+                yield {
+                    "status": "error",
+                    "error": {
+                        "type": "api_error",
+                        "code": response.status_code,
+                        "message": "API request failed"
+                    }
+                }
                 return
 
             try:
                 response_data = response.json()
                 content = response_data['choices'][0]['message']['content']
-                
-                # Parse the response as JSON
                 response_json = json.loads(content)
                 
-                # Ensure disclaimer is present
-                if "disclaimer" not in response_json:
-                    response_json["disclaimer"] = "This information is for educational purposes only and should not replace professional medical advice."
-                
                 yield {
-                    "type": "complete",
-                    "content": response_json,
-                    "raw_response": content
+                    "status": "success",
+                    "data": response_json
                 }
                 
             except json.JSONDecodeError as e:
                 yield {
-                    "type": "error", 
-                    "message": f"Error parsing JSON response: {str(e)}",
-                    "raw_response": content
+                    "status": "error",
+                    "error": {
+                        "type": "parsing_error",
+                        "message": str(e),
+                        "raw_response": content
+                    }
                 }
                 
         except Exception as e:
-            yield {"type": "error", "message": f"Error: {str(e)}"}
+            yield {
+                "status": "error",
+                "error": {
+                    "type": "general_error",
+                    "message": str(e)
+                }
+            }
 
-    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> str:
-        return f"""
-        Patient Profile:
-        Name: {user_profile.get('name')}
-        Age: {user_profile.get('age')}
-        Location: {user_profile.get('location')}
-        Diagnosis: {user_profile.get('diagnosis')}
-        Concern: {user_profile.get('concern')}
-        Target: {user_profile.get('target')}
+    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
+        return json.dumps({
+            "patient_profile": user_profile,
+            "medical_analysis": profile_analysis,
+            "query": query
+        })
 
-        Analysis: {profile_analysis}
-
-        Query: {query}
-
-        Provide a response in the required JSON format, ensuring all fields are filled appropriately.
-        """
-
-# Initialize session state at the start
+# Initialize session state
 if 'profile_complete' not in st.session_state:
     st.session_state.profile_complete = False
 if 'user_profile' not in st.session_state:
     st.session_state.user_profile = {
-        'name': '', 
-        'age': '', 
-        'location': '',
-        'diagnosis': '', 
-        'concern': '', 
-        'target': ''
+        'name': '', 'age': '', 'location': '',
+        'diagnosis': '', 'concern': '', 'target': ''
     }
 if 'profile_analysis' not in st.session_state:
-    st.session_state.profile_analysis = None
+    st.session_state.profile_analysis = {}
 if 'chat_history' not in st.session_state:
     st.session_state.chat_history = []
 if 'current_step' not in st.session_state:
@@ -224,45 +211,43 @@ if 'current_step' not in st.session_state:
 def main():
     st.title("GLP-1 Medication Assistant")
     
-    # Validate API keys
     if 'OPENAI_API_KEY' not in st.secrets or 'PPLX_API_KEY' not in st.secrets:
-        st.error("Missing API keys")
+        st.error(json.dumps({"error": "Missing API keys"}))
         return
     
-    # Initialize clients
     openai_client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
     profile_manager = UserProfileManager(openai_client)
     profile_analyzer = ProfileAnalyzer(openai_client)
     glp1_bot = GLP1Bot(st.secrets['PPLX_API_KEY'])
     
-    # Profile collection phase
     if not st.session_state.profile_complete:
         if st.session_state.current_step == 'personal_info':
             personal_info = st.text_input("Enter name, age, and location:")
             if st.button("Next") and personal_info:
                 info = profile_manager.process_user_input(personal_info, "personal_info")
                 st.session_state.user_profile.update(info)
+                st.json(info)  # Display JSON response
                 if all(st.session_state.user_profile[f] for f in ['name', 'age', 'location']):
                     st.session_state.current_step = 'medical_info'
                     st.rerun()
         
         else:  # medical_info step
-            st.write("Current Profile:", st.session_state.user_profile)
+            st.json(st.session_state.user_profile)  # Display current profile as JSON
             medical_info = st.text_input("Enter diagnosis, concern, and treatment target:")
             if st.button("Complete") and medical_info:
                 info = profile_manager.process_user_input(medical_info, "medical_info")
                 st.session_state.user_profile.update(info)
+                st.json(info)  # Display JSON response
                 if all(st.session_state.user_profile[f] for f in ['diagnosis', 'concern', 'target']):
-                    st.session_state.profile_analysis = profile_analyzer.analyze_profile(
-                        st.session_state.user_profile
-                    )
+                    profile_analysis = profile_analyzer.analyze_profile(st.session_state.user_profile)
+                    st.session_state.profile_analysis = profile_analysis
+                    st.json(profile_analysis)  # Display analysis as JSON
                     st.session_state.profile_complete = True
                     st.rerun()
     
-    # Query phase
     else:
-        st.write("Profile:", st.session_state.user_profile)
-        st.write("Analysis:", st.session_state.profile_analysis)
+        st.json(st.session_state.user_profile)  # Display profile as JSON
+        st.json(st.session_state.profile_analysis)  # Display analysis as JSON
         
         query = st.text_input("Ask about GLP-1 medications:")
         if st.button("Submit") and query:
@@ -271,25 +256,16 @@ def main():
                 user_profile=st.session_state.user_profile,
                 profile_analysis=st.session_state.profile_analysis
             ):
-                if response["type"] == "error":
-                    st.error(response["message"])
-                    if "raw_response" in response:
-                        st.write("Raw response:", response["raw_response"])
-                elif response["type"] == "complete":
-                    json_response = response["content"]
-                    
-                    # Display formatted JSON response
-                    st.json(json_response)
-                    
-                    # Store in chat history
+                st.json(response)  # Display all responses as JSON
+                if response["status"] == "success":
                     st.session_state.chat_history.append({
+                        "timestamp": str(datetime.datetime.now()),
                         "query": query,
-                        "response": json_response,
-                        "raw_response": response.get("raw_response", "")
+                        "response": response["data"]
                     })
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        st.error(f"Error: {str(e)}")
+        st.error(json.dumps({"error": str(e)}))
