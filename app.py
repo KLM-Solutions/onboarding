@@ -1,6 +1,8 @@
+
 import streamlit as st
 import requests
 import json
+import datetime
 from typing import Dict, Any, Optional, Generator
 from openai import OpenAI
 
@@ -153,8 +155,6 @@ class GLP1Bot:
         Provide response in a simple manner that is easy to understand at preferably a 11th grade literacy level with reduced pharmaceutical or medical jargon
         Always Return sources in a hyperlink format
         Always maintain medical accuracy while being accessible and empathetic.
-
-        Format all responses as JSON with appropriate sections matching the above structure.
         """
 
     def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Dict[str, Any]:
@@ -168,15 +168,32 @@ class GLP1Bot:
             ]
         }
         
+        # Get response from API
         response = requests.post(
             "https://api.perplexity.ai/chat/completions",
             headers=self.pplx_headers,
             json=payload
         )
         
+        # Extract the raw response content
         response_data = response.json()
-        content = response_data['choices'][0]['message']['content']
-        return json.loads(content)
+        raw_content = response_data['choices'][0]['message']['content']
+        
+        # Format the response as JSON
+        formatted_response = {
+            "query_info": {
+                "question": query,
+                "patient_name": user_profile.get('name'),
+                "patient_age": user_profile.get('age')
+            },
+            "response_content": raw_content,
+            "metadata": {
+                "model": self.pplx_model,
+                "timestamp": str(datetime.datetime.now())
+            }
+        }
+        
+        return formatted_response
 
     def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
         return f"""
@@ -192,7 +209,7 @@ class GLP1Bot:
 
         Query: {query}
 
-        Provide a response in the required JSON format, ensuring all fields are filled appropriately.
+        Please provide a detailed response following the structure outlined above.
         Remember to maintain simple language at an 11th grade reading level.
         Include hyperlinked sources related to the response.
         """
