@@ -196,9 +196,7 @@ class GLP1Bot:
             except json.JSONDecodeError as e:
                 yield { "raw_content": content}
                 
-        except Exception as e:
-            yield {"status": "error", "message": str(e)}
-
+        
     def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
         return f"""
         Patient Profile:
