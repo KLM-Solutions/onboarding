@@ -116,7 +116,6 @@ class GLP1Bot:
             "Content-Type": "application/json",
             "Accept": "application/json"
         }
-        # Updated system prompt to enforce JSON response format
         self.pplx_system_prompt = """
         You are a specialized medical information assistant providing GLP-1 medication information.
         
@@ -135,23 +134,6 @@ class GLP1Bot:
         }
         
         Keep all responses factual and tailored to the patient's profile.
-        """
-
-    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> str:
-        return f"""
-        Patient Profile:
-        Name: {user_profile.get('name')}
-        Age: {user_profile.get('age')}
-        Location: {user_profile.get('location')}
-        Diagnosis: {user_profile.get('diagnosis')}
-        Concern: {user_profile.get('concern')}
-        Target: {user_profile.get('target')}
-
-        Analysis: {profile_analysis}
-
-        Query: {query}
-
-        Provide a response in the required JSON format, ensuring all fields are filled appropriately.
         """
 
     def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
@@ -185,7 +167,7 @@ class GLP1Bot:
                 
                 # Ensure disclaimer is present
                 if "disclaimer" not in response_json:
-                    response_json["disclaimer"] = "This information is for educational purposes only and should not replace professional medical advice. Always consult your healthcare provider before making any changes to your medication or treatment plan."
+                    response_json["disclaimer"] = "This information is for educational purposes only and should not replace professional medical advice."
                 
                 yield {
                     "type": "complete",
@@ -203,23 +185,81 @@ class GLP1Bot:
         except Exception as e:
             yield {"type": "error", "message": f"Error: {str(e)}"}
 
+    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> str:
+        return f"""
+        Patient Profile:
+        Name: {user_profile.get('name')}
+        Age: {user_profile.get('age')}
+        Location: {user_profile.get('location')}
+        Diagnosis: {user_profile.get('diagnosis')}
+        Concern: {user_profile.get('concern')}
+        Target: {user_profile.get('target')}
+
+        Analysis: {profile_analysis}
+
+        Query: {query}
+
+        Provide a response in the required JSON format, ensuring all fields are filled appropriately.
+        """
+
+# Initialize session state at the start
+if 'profile_complete' not in st.session_state:
+    st.session_state.profile_complete = False
+if 'user_profile' not in st.session_state:
+    st.session_state.user_profile = {
+        'name': '', 
+        'age': '', 
+        'location': '',
+        'diagnosis': '', 
+        'concern': '', 
+        'target': ''
+    }
+if 'profile_analysis' not in st.session_state:
+    st.session_state.profile_analysis = None
+if 'chat_history' not in st.session_state:
+    st.session_state.chat_history = []
+if 'current_step' not in st.session_state:
+    st.session_state.current_step = 'personal_info'
+
 def main():
     st.title("GLP-1 Medication Assistant")
     
+    # Validate API keys
     if 'OPENAI_API_KEY' not in st.secrets or 'PPLX_API_KEY' not in st.secrets:
         st.error("Missing API keys")
         return
     
-    initialize_session_state()
-    
+    # Initialize clients
     openai_client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
     profile_manager = UserProfileManager(openai_client)
     profile_analyzer = ProfileAnalyzer(openai_client)
     glp1_bot = GLP1Bot(st.secrets['PPLX_API_KEY'])
     
+    # Profile collection phase
     if not st.session_state.profile_complete:
-        # [Previous profile collection code remains the same]
-        pass
+        if st.session_state.current_step == 'personal_info':
+            personal_info = st.text_input("Enter name, age, and location:")
+            if st.button("Next") and personal_info:
+                info = profile_manager.process_user_input(personal_info, "personal_info")
+                st.session_state.user_profile.update(info)
+                if all(st.session_state.user_profile[f] for f in ['name', 'age', 'location']):
+                    st.session_state.current_step = 'medical_info'
+                    st.rerun()
+        
+        else:  # medical_info step
+            st.write("Current Profile:", st.session_state.user_profile)
+            medical_info = st.text_input("Enter diagnosis, concern, and treatment target:")
+            if st.button("Complete") and medical_info:
+                info = profile_manager.process_user_input(medical_info, "medical_info")
+                st.session_state.user_profile.update(info)
+                if all(st.session_state.user_profile[f] for f in ['diagnosis', 'concern', 'target']):
+                    st.session_state.profile_analysis = profile_analyzer.analyze_profile(
+                        st.session_state.user_profile
+                    )
+                    st.session_state.profile_complete = True
+                    st.rerun()
+    
+    # Query phase
     else:
         st.write("Profile:", st.session_state.user_profile)
         st.write("Analysis:", st.session_state.profile_analysis)
