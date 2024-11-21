@@ -1,286 +1,266 @@
-
 import streamlit as st
-import requests
-import json
-import datetime
-from typing import Dict, Any, Optional, Generator
 from openai import OpenAI
+import json
+from typing import Dict, List, Tuple
 
-class UserProfileManager:
-    def __init__(self, openai_client: OpenAI):
-        self.client = openai_client
-        self.system_instructions = {
-            "personal_info": """
-            You are a medical system assistant collecting personal information.
-            
-            OBJECTIVE:
-            Extract personal information from user input, focusing on three key fields:
-            1. name
-            2. age
-            3. location
+def get_system_instructions():
+    return {
+        "personal_info": """
+        You are a medical system assistant collecting personal information.
+        
+        OBJECTIVE:
+        Extract personal information from user input, focusing on three key fields:
+        1. name
+        2. age
+        3. location
 
-            RULES:
-            1. Only extract information that is explicitly stated
-            2. Format response as JSON: {"name": "", "age": "", "location": ""}
-            3. If a field is missing, leave it empty
-            4. For age, only accept numeric values
-            """,
+        RULES:
+        1. Only extract information that is explicitly stated
+        2. Format response as JSON: {"name": "", "age": "", "location": ""}
+        3. If a field is missing, leave it empty
+        4. For age, only accept numeric values
+        5. Don't make assumptions about missing information
+        6. Don't repeat questions for information already provided
+        7. If no new information is provided in the input, return empty values
 
-            "medical_info": """
-            You are a medical system assistant collecting information about a patient's condition.
-            
-            OBJECTIVE:
-            Extract medical information from user input, focusing on three key fields:
-            1. diagnosis
-            2. concern
-            3. target
 
-            RULES:
-            1. Only extract information that is explicitly stated
-            2. Format response as JSON: {"diagnosis": "", "concern": "", "target": ""}
-            3. If a field is missing, leave it empty
-            4. Keep medical terminology as stated by the user
-            """
-        }
+        EXAMPLES:
+        User: "My name is John"
+        Response: {"name": "John", "age": "", "location": ""}
 
-    def process_user_input(self, user_input: str, info_type: str) -> Dict[str, str]:
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": self.system_instructions[info_type]},
-                {"role": "user", "content": user_input}
-            ],
-            response_format={ "type": "json_object" }
-        )
-        return json.loads(response.choices[0].message.content)
+        User: "I'm 25 and live in New York"
+        Response: {"age": "25", "location": "New York", "name": ""}
+        """,
 
-class ProfileAnalyzer:
-    def __init__(self, openai_client: OpenAI):
-        self.client = openai_client
-        self.analysis_prompt = """
-        You are a medical profile analyzer specializing in GLP-1 medication contexts. 
-        Review the following patient profile and provide a concise analysis focusing on:
+        "medical_info": """
+        You are a medical system assistant collecting information about a patient's condition.
+        
+        OBJECTIVE:
+        Extract medical information from user input, focusing on three key fields:
+        1. diagnosis
+        2. concern
+        3. target
 
-        1. Key Risk Factors:
-           - Age-related considerations
-           - Diagnosis-specific concerns
-           - Potential contraindications
+        RULES:
+        1. Only extract information that is explicitly stated
+        2. Format response as JSON: {"diagnosis": "", "concern": "", "target": ""}
+        3. If a field is missing, leave it empty
+        4. Keep medical terminology as stated by the user
+        5. Don't make medical assumptions or suggestions
+        6. Don't repeat questions for information already provided
+        7. If no new information is provided in the input, return empty values
 
-        2. Treatment Context:
-           - Relevance of GLP-1 medications to their condition
-           - Important monitoring considerations
-           - Lifestyle factors to consider
 
-        3. Special Considerations:
-           - Key drug interactions to watch for
-           - Specific precautions based on medical history
-           - Priority health targets
+        EXAMPLES:
+        User: "I have diabetes"
+        Response: {"diagnosis": "diabetes", "concern": "", "target": ""}
 
-        Return the analysis in JSON format with these exact sections.
+        User: "My blood sugar is high and I want to control it"
+        Response: {"diagnosis": "", "concern": "high blood sugar", "target": "control blood sugar"}
         """
-
-    def analyze_profile(self, profile: Dict[str, str]) -> Dict:
-        prompt = f"""
-        Patient Profile:
-        - Name: {profile['name']}
-        - Age: {profile['age']}
-        - Location: {profile['location']}
-        - Diagnosis: {profile['diagnosis']}
-        - Primary Concern: {profile['concern']}
-        - Treatment Target: {profile['target']}
-
-        {self.analysis_prompt}
-        """
-
-        response = self.client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You are a medical profile analyzer."},
-                {"role": "user", "content": prompt}
-            ],
-            response_format={ "type": "json_object" }
-        )
-        
-        return json.loads(response.choices[0].message.content)
-
-class GLP1Bot:
-    def __init__(self, pplx_api_key: str):
-        self.pplx_api_key = pplx_api_key
-        self.pplx_model = "llama-3.1-sonar-large-128k-online"
-        self.pplx_headers = {
-            "Authorization": f"Bearer {self.pplx_api_key}",
-            "Content-Type": "application/json",
-            "Accept": "application/json"
-        }
-        self.pplx_system_prompt = """
-        You are a specialized medical information assistant providing highly personalized GLP-1 medication information.
-        
-        CORE RESPONSIBILITIES:
-        1. Provide information EXCLUSIVELY about GLP-1 medications (e.g., Ozempic, Wegovy, Mounjaro)
-        2. Tailor responses to the patient's specific profile and medical conditions
-        3. Consider age-specific factors and medical history
-        4. Highlight relevant interactions with existing conditions
-        5. Address patient's specific concerns and treatment targets
-
-        RESPONSE STRUCTURE:
-        1. Personal Acknowledgment
-           - Reference patient's name and relevant profile details
-           - Acknowledge their specific medical situation
-        
-        2. Targeted Answer
-           - Address the specific query
-           - Connect information to their medical context
-           - Consider their diagnosis and treatment targets
-        
-        3. Safety and Precautions
-           - Highlight relevant warnings based on their profile
-           - Note specific contraindications for their condition
-           - Address age-specific considerations
-        
-        4. Personalized Recommendations
-           - Suggest relevant monitoring based on their condition
-           - Provide lifestyle recommendations aligned with their goals
-           - Consider their location for practical advice
-        
-        5. Next Steps
-           - Suggest specific questions for their healthcare provider
-           - Recommend relevant monitoring based on their profile
-           - Provide actionable takeaways
-
-        6. Medical Disclaimer
-           - Include standard medical disclaimer
-           - Encourage healthcare provider consultation
-
-        Always provide source which is related to the generated response.
-        Provide response in a simple manner that is easy to understand at preferably a 11th grade literacy level with reduced pharmaceutical or medical jargon
-        Always Return sources in a hyperlink format
-        Always maintain medical accuracy while being accessible and empathetic.
-        """
-
-    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> Dict[str, Any]:
-        prompt = self.generate_personalized_prompt(query, user_profile, profile_analysis)
-        
-        payload = {
-            "model": self.pplx_model,
-            "messages": [
-                {"role": "system", "content": self.pplx_system_prompt},
-                {"role": "user", "content": prompt}
-            ]
-        }
-        
-        # Get response from API
-        response = requests.post(
-            "https://api.perplexity.ai/chat/completions",
-            headers=self.pplx_headers,
-            json=payload
-        )
-        
-        # Extract the raw response content
-        response_data = response.json()
-        raw_content = response_data['choices'][0]['message']['content']
-        
-        # Format the response as JSON
-        formatted_response = {
-            "query_info": {
-                "question": query,
-                "patient_name": user_profile.get('name'),
-                "patient_age": user_profile.get('age')
-            },
-            "response_content": raw_content,
-            "metadata": {
-                "model": self.pplx_model,
-                "timestamp": str(datetime.datetime.now())
-            }
-        }
-        
-        return formatted_response
-
-    def generate_personalized_prompt(self, query: str, user_profile: Dict[str, str], profile_analysis: Dict[str, Any]) -> str:
-        return f"""
-        Patient Profile:
-        Name: {user_profile.get('name')}
-        Age: {user_profile.get('age')}
-        Location: {user_profile.get('location')}
-        Diagnosis: {user_profile.get('diagnosis')}
-        Concern: {user_profile.get('concern')}
-        Target: {user_profile.get('target')}
-
-        Analysis: {json.dumps(profile_analysis)}
-
-        Query: {query}
-
-        Please provide a detailed response following the structure outlined above.
-        Remember to maintain simple language at an 11th grade reading level.
-        Include hyperlinked sources related to the response.
-        """
-
-# Initialize session state
-if 'profile_complete' not in st.session_state:
-    st.session_state.profile_complete = False
-if 'user_profile' not in st.session_state:
-    st.session_state.user_profile = {
-        'name': '', 'age': '', 'location': '',
-        'diagnosis': '', 'concern': '', 'target': ''
     }
-if 'profile_analysis' not in st.session_state:
-    st.session_state.profile_analysis = None
-if 'chat_history' not in st.session_state:
-    st.session_state.chat_history = []
-if 'current_step' not in st.session_state:
-    st.session_state.current_step = 'personal_info'
+def initialize_session_state():
+    if 'mode' not in st.session_state:
+        st.session_state.mode = None
+    if 'form_data' not in st.session_state:
+        st.session_state.form_data = {
+            'name': '',
+            'age': '',
+            'location': '',
+            'diagnosis': '',
+            'concern': '',
+            'target': ''
+        }
+    if 'conversation_step' not in st.session_state:
+        st.session_state.conversation_step = 1
+    if 'conversation_history' not in st.session_state:
+        st.session_state.conversation_history = []
+    if 'conversation_complete' not in st.session_state:
+        st.session_state.conversation_complete = False
+
+def get_missing_fields(step: int) -> List[str]:
+    """Get list of missing fields for current step"""
+    if step == 1:
+        return [field for field in ['name', 'age', 'location'] 
+                if not st.session_state.form_data.get(field)]
+    else:
+        return [field for field in ['diagnosis', 'concern', 'target'] 
+                if not st.session_state.form_data.get(field)]
+
+def check_step_completion(step: int) -> bool:
+    """Check if all required fields for the current step are filled"""
+    if step == 1:
+        return all(st.session_state.form_data.get(field) 
+                  for field in ['name', 'age', 'location'])
+    else:
+        return all(st.session_state.form_data.get(field) 
+                  for field in ['diagnosis', 'concern', 'target'])
+def process_user_input(client: OpenAI, user_input: str) -> str:
+    """Process user input and generate next prompt"""
+    try:
+        # Get appropriate instruction set
+        instruction_key = "personal_info" if st.session_state.conversation_step == 1 else "medical_info"
+        
+        # Extract information
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[
+                {"role": "system", "content": get_system_instructions()[instruction_key]},
+                {"role": "user", "content": user_input}
+            ]
+        )
+        extracted_info = json.loads(response.choices[0].message.content)
+        
+        # Update form data with extracted information
+        for field, value in extracted_info.items():
+            if value:
+                st.session_state.form_data[field] = value
+        
+        # Generate next prompt based on missing fields
+        missing = get_missing_fields(st.session_state.conversation_step)
+        
+        if not missing:
+            if st.session_state.conversation_step == 1:
+                return "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
+            else:
+                return "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
+        
+        if st.session_state.conversation_step == 1:
+            name = st.session_state.form_data.get('name', '')
+            greeting = f"Thank you, {name}! " if name else ""
+            return f"{greeting}I still need your {', '.join(missing)}. Please provide them."
+        else:
+            diagnosis = st.session_state.form_data.get('diagnosis', '')
+            if diagnosis:
+                return f"I see your diagnosis is {diagnosis}. Could you please also tell me your {', '.join(missing)}?"
+            else:
+                return f"Please share your {', '.join(missing)}."
+                
+    except Exception as e:
+        st.error(f"Error processing input: {str(e)}")
+        return "I'm having trouble processing that. Could you please try again?"
 
 def main():
-    st.title("GLP-1 Medication Assistant")
+    st.title("Medical Information System")
     
-    if 'OPENAI_API_KEY' not in st.secrets or 'PPLX_API_KEY' not in st.secrets:
-        st.json({"error": "Missing API keys"})
+    # Initialize OpenAI client
+    if 'OPENAI_API_KEY' not in st.secrets:
+        st.error("OpenAI API key not found. Please add it to your secrets.")
         return
     
-    openai_client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
-    profile_manager = UserProfileManager(openai_client)
-    profile_analyzer = ProfileAnalyzer(openai_client)
-    glp1_bot = GLP1Bot(st.secrets['PPLX_API_KEY'])
+    client = OpenAI(api_key=st.secrets['OPENAI_API_KEY'])
     
-    if not st.session_state.profile_complete:
-        if st.session_state.current_step == 'personal_info':
-            personal_info = st.text_input("Enter name, age, and location:")
-            if st.button("Next") and personal_info:
-                info = profile_manager.process_user_input(personal_info, "personal_info")
-                st.json(info)
-                st.session_state.user_profile.update(info)
-                if all(st.session_state.user_profile[f] for f in ['name', 'age', 'location']):
-                    st.session_state.current_step = 'medical_info'
-                    st.rerun()
-        
-        else:  # medical_info step
-            st.json(st.session_state.user_profile)
-            medical_info = st.text_input("Enter diagnosis, concern, and treatment target:")
-            if st.button("Complete") and medical_info:
-                info = profile_manager.process_user_input(medical_info, "medical_info")
-                st.json(info)
-                st.session_state.user_profile.update(info)
-                if all(st.session_state.user_profile[f] for f in ['diagnosis', 'concern', 'target']):
-                    analysis = profile_analyzer.analyze_profile(st.session_state.user_profile)
-                    st.json(analysis)
-                    st.session_state.profile_analysis = analysis
-                    st.session_state.profile_complete = True
-                    st.rerun()
+    # Initialize session state
+    initialize_session_state()
     
-    else:
-        st.json({"profile": st.session_state.user_profile, "analysis": st.session_state.profile_analysis})
+    # Mode selection
+    col1, col2, col3 = st.columns([1, 1, 1])
+    with col1:
+        if st.button("Enter by Field", use_container_width=True):
+            st.session_state.mode = "field"
+    with col2:
+        if st.button("Enter by Conversation", use_container_width=True):
+            st.session_state.mode = "conversation"
+            if not st.session_state.conversation_history:
+                st.session_state.conversation_history.append(
+                    ("system", "Tell me about yourself (name, age, location):")
+                )
+    with col3:
+        if st.button("Reset", use_container_width=True):
+            st.session_state.clear()
+            initialize_session_state()
+    
+    st.divider()
+    # Form Mode
+    if st.session_state.mode == "field":
+        st.subheader("Enter Information by Field")
         
-        query = st.text_input("Ask about GLP-1 medications:")
-        if st.button("Submit") and query:
-            response = glp1_bot.stream_pplx_response(
-                query=query,
-                user_profile=st.session_state.user_profile,
-                profile_analysis=st.session_state.profile_analysis
+        # Create two columns
+        col1, col2 = st.columns([2, 1])
+        
+        with col1:
+            # Form for input
+            with st.form("medical_form"):
+                st.text_input("Name", key="name", value=st.session_state.form_data['name'])
+                st.number_input("Age", key="age", value=int(st.session_state.form_data['age']) if st.session_state.form_data['age'].isdigit() else 0, min_value=0, max_value=150)
+                st.text_input("Location", key="location", value=st.session_state.form_data['location'])
+                st.text_input("Diagnosis", key="diagnosis", value=st.session_state.form_data['diagnosis'])
+                st.text_area("Concern", key="concern", value=st.session_state.form_data['concern'])
+                st.text_area("Target", key="target", value=st.session_state.form_data['target'])
+                
+                if st.form_submit_button("Submit"):
+                    st.session_state.form_data = {
+                        'name': st.session_state.name,
+                        'age': str(st.session_state.age),
+                        'location': st.session_state.location,
+                        'diagnosis': st.session_state.diagnosis,
+                        'concern': st.session_state.concern,
+                        'target': st.session_state.target
+                    }
+                    st.success("Information submitted successfully!")
+        
+        with col2:
+            # Summary section
+            st.markdown("### Summary")
+            if any(st.session_state.form_data.values()):
+                # Personal Information
+                st.markdown("**Personal Information:**")
+                st.write(f"👤 Name: {st.session_state.form_data.get('name', '-')}")
+                st.write(f"📅 Age: {st.session_state.form_data.get('age', '-')}")
+                st.write(f"📍 Location: {st.session_state.form_data.get('location', '-')}")
+                
+                # Medical Information
+                st.markdown("**Medical Information:**")
+                st.write(f"🏥 Diagnosis: {st.session_state.form_data.get('diagnosis', '-')}")
+                st.write(f"⚕️ Concern: {st.session_state.form_data.get('concern', '-')}")
+                st.write(f"🎯 Target: {st.session_state.form_data.get('target', '-')}")
+            else:
+                st.info("No information collected yet")
+    
+    # Conversation Mode
+    elif st.session_state.mode == "conversation":
+        st.subheader("Conversation Mode")
+        
+        # Show current step
+        step_text = "Step 1: Personal Information" if st.session_state.conversation_step == 1 else "Step 2: Medical Information"
+        st.info(step_text)
+        
+        # Display conversation history
+        for speaker, message in st.session_state.conversation_history:
+            if speaker == "system":
+                st.markdown(f"🤖 **Assistant**: {message}")
+            else:
+                st.markdown(f"👤 **You**: {message}")
+        
+        # Input area with missing fields indicator
+        if not st.session_state.conversation_complete:
+            missing = get_missing_fields(st.session_state.conversation_step)
+            placeholder = f"Type your {', '.join(missing)}..."
+            
+            user_input = st.text_input(
+                "Your response",
+                key="conversation_input",
+                placeholder=placeholder
             )
-            st.json(response)
-            st.session_state.chat_history.append({
-                "query": query,
-                "response": response
-            })
+            
+            if st.button("Send") and user_input:
+                # Add user input to history
+                st.session_state.conversation_history.append(("user", user_input))
+                
+                # Process input and get next prompt
+                next_prompt = process_user_input(client, user_input)
+                
+                # Check step completion and update accordingly
+                if check_step_completion(st.session_state.conversation_step):
+                    if st.session_state.conversation_step == 1:
+                        st.session_state.conversation_step = 2
+                        next_prompt = "Great! Now let's talk about your medical condition. Please share your diagnosis, main concern, and treatment target."
+                    else:
+                        st.session_state.conversation_complete = True
+                        next_prompt = "Thank you! I've collected all the necessary information. You can view the summary in the 'Enter by Field' section."
+                
+                st.session_state.conversation_history.append(("system", next_prompt))
+                st.rerun()
 
 if __name__ == "__main__":
     main()
