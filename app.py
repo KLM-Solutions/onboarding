@@ -269,7 +269,7 @@ class GLP1Bot:
         - Next steps and monitoring suggestions
         - Medical disclaimer
         """
- def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
+     def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
         try:
             personalized_query = self.generate_personalized_prompt(query, user_profile, profile_analysis)
             
