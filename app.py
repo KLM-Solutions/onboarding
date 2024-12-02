@@ -102,7 +102,7 @@ class ProfileAnalyzer:
                     {"role": "system", "content": "You are a medical profile analyzer."},
                     {"role": "user", "content": prompt}
                 ],
-                temperature=0.7,
+                temperature=0.1,
                 max_tokens=500
             )
             
@@ -250,7 +250,7 @@ class GLP1Bot:
         - Medical disclaimer
         """
 
-    def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
+  def stream_pplx_response(self, query: str, user_profile: Dict[str, str], profile_analysis: str) -> Generator[Dict[str, Any], None, None]:
         try:
             personalized_query = self.generate_personalized_prompt(query, user_profile, profile_analysis)
             
