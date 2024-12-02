@@ -5,6 +5,26 @@ import re
 from typing import Dict, Any, Optional, Generator
 from openai import OpenAI
 
+def validate_api_keys():
+    """Validate the presence and basic format of required API keys"""
+    required_keys = {
+        'OPENAI_API_KEY': 'OpenAI',
+        'PPLX_API_KEY': 'Perplexity'
+    }
+    
+    missing_keys = []
+    for key, service in required_keys.items():
+        if key not in st.secrets:
+            missing_keys.append(service)
+        elif not st.secrets[key].strip():
+            missing_keys.append(service)
+    
+    if missing_keys:
+        st.error(f"Missing API keys for: {', '.join(missing_keys)}")
+        return False
+    return True
+
+
 class UserProfileManager:
     def __init__(self, openai_client: OpenAI):
         self.client = openai_client
